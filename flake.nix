@@ -8,12 +8,30 @@
     flake-utils.lib.eachDefaultSystem (system:
     let
       pkgs = import nixpkgs { inherit system; };
+      snitch = pkgs.gcc13Stdenv.mkDerivation {
+        name = "snitch_tests";
+        buildInputs = [ ];
+        nativeBuildInputs = with pkgs; [ cmake ninja python3 ];
+        #cmakeFlags = [ "-D" "snitch:create_library=true" ];
+        #cmakeFlags = [ "-DSNITCH_HEADER_ONLY=ON" ];
+        src = pkgs.fetchzip {
+          url = "https://github.com/cschreib/snitch/archive/refs/tags/v1.2.2.tar.gz";
+          sha256 = "sha256-xeiGCQia0tId4GN/w6Kfz4Ga8u6pWSe6gi9VRz2Pwok=";
+        };
+      };
       der = pkgs.gcc13Stdenv.mkDerivation {
         name = "serp";
-        buildInputs = [pkgs.boost];
+        buildInputs = [pkgs.boost snitch];
+        snitch_header = snitch.out;
         nativeBuildInputs = [pkgs.clang_15];
-        #installPhase = "mkdir -p \"$out/include\" && cp ascip.hpp -t \"$out/include\" && cp -rt \"$out/include\" ascip";
-        #buildPhase = "g++ -std=c++23 -fwhole-program -march=native ./test.cpp -o ascip_test && ./ascip_test";
+        CPATH = pkgs.lib.strings.concatStringsSep ":" [
+          "${snitch}/include/snitch"
+        ];
+        LIBRARY_PATH = pkgs.lib.strings.concatStringsSep ":" [
+          "${snitch}/lib"
+        ];
+        #installPhase = "mkdir -p \"$out/include\" && cp serp.hpp -t \"$out/include\" && cp -rt \"$out/include\" serp";
+        #buildPhase = "g++ -std=c++23 -fwhole-program -march=native ./test.cpp -o serp && ./serp_test";
         meta.description = "cpp universal serialization library.";
         src = ./.;
       };
