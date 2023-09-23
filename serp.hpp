@@ -18,6 +18,12 @@ template<auto ind, typename type> cpp17_adl_fail get(const type&);
 template<template<typename...>class tuple, typename... types>
 constexpr auto size(const tuple<types...>*) { return sizeof...(types); }
 
+template<auto cur_ct_ind, template<typename...>class variant, typename... types>
+constexpr auto& ct_var_emplace(variant<types...>& var, auto cur, auto ind) {
+	if(cur == ind) return var.emplace<cur_ct_ind>();
+	else return ct_var_emplace<cur_ct_ind+1>(var, cur+1, ind);
+}
+
 template<typename type>
 class cpp17_concepts {
 	constexpr static bool _is_adl_get(const void*) { return false; }
@@ -42,6 +48,13 @@ class cpp17_concepts {
 
 	constexpr static bool _can_dereference(const void*) { return false; }
 	template<typename t> constexpr static auto _can_dereference(t* p) -> decltype(*(*p), void(), true) { return true; }
+
+	constexpr static bool _is_index_member(const void*) { return false; }
+	template<typename t> constexpr static auto _is_index_member(const t* p) -> decltype(p->index(), void(), true) { return true; }
+
+	constexpr static auto _visit_cpp17_helper = [](const auto&) {};
+	constexpr static bool _is_adl_visit(const void*) { return false; }
+	template<typename t> constexpr static auto _is_adl_visit(const t* p) -> decltype(visit(_visit_cpp17_helper, *p), void(), true) { return true; }
 public:
 	constexpr static bool is_adl_get = _is_adl_get(static_cast<const type*>(nullptr));
 	constexpr static bool is_size_member = _is_size_member(static_cast<type*>(nullptr));
@@ -52,6 +65,7 @@ public:
 	constexpr static bool can_dereference = _can_dereference(static_cast<type*>(nullptr));
 	constexpr static bool is_smart_pointer = is_element_type_member && is_get_member_with_ptr && can_dereference;
 	constexpr static bool is_pointer = std::is_pointer_v<type> || is_smart_pointer;
+	constexpr static bool is_variant = _is_index_member(static_cast<const type*>(nullptr)) && is_adl_get && _is_adl_visit(static_cast<const type*>(nullptr));
 };
 
 template<typename type>
@@ -90,7 +104,11 @@ constexpr auto resize_as_need(factory_t&& io, type& to, size_type shift) {
 template<typename factory, typename type>
 constexpr void pack(factory&& io, const type& what) {
 	using concepts = details::cpp17_concepts<type>;
-	if constexpr(concepts::is_adl_get)
+	if constexpr(concepts::is_variant) {
+		pack(io, what.index());
+		visit( [&io](const auto& v){ pack(io, v); }, what );
+	}
+	else if constexpr(concepts::is_adl_get)
 		details::call_pack_cpp17(io, what);
 	else if constexpr(concepts::is_size_member) {
 		pack(io, io.container_size(what.size()));
@@ -109,7 +127,13 @@ constexpr size_type read(factory&& io, type& to, size_type shift) {
 	static_assert( !std::is_const_v<type>, "cannot read to constant storage" );
 
 	using concepts = details::cpp17_concepts<type>;
-	if constexpr(concepts::is_adl_get) return details::read_tuple<0>(io, to, shift);
+	if constexpr(concepts::is_variant) {
+		decltype(to.index()) ind;
+		shift = read(io, ind, shift);
+		details::ct_var_emplace();
+		ind.emplace<ind>();
+	}
+	else if constexpr(concepts::is_adl_get) return details::read_tuple<0>(io, to, shift);
 	else if constexpr(concepts::is_pointer) {
 		bool is_null;
 		shift = read(io, is_null, shift);

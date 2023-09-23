@@ -60,6 +60,9 @@ static_assert( serp::details::cpp17_concepts<std::tuple<int,char>>::is_adl_get )
 static_assert( serp::details::cpp17_concepts<std::string>::is_size_member );
 static_assert( serp::details::cpp17_concepts<std::string>::is_resize_member );
 
+static_assert( serp::details::cpp17_concepts<std::variant<int,std::string>>::is_variant );
+static_assert( !serp::details::cpp17_concepts<std::tuple<int,char>>::is_variant );
+
 using map_str_int = std::map<std::string,int>;
 using string_cpp17_concepts = serp::details::cpp17_concepts<std::string>;
 using map_str_int_cpp17_concepts = serp::details::cpp17_concepts<map_str_int>;
@@ -244,3 +247,12 @@ TEST_CASE("rw pointers") {
 	CHECK(get<1>(*get<1>(answ)) == nullptr);
 	CHECK(get<2>(*get<2>(answ)) == nullptr);
 }
+
+static_assert( []{
+	using namespace std::literals;
+	io io;
+	std::variant<std::vector<std::string>, std::string> answ, src = "str"s;
+	serp::pack(io, src);
+	serp::read(io, answ);
+	return answ.index() ;
+}() == 1);
