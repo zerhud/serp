@@ -8,7 +8,7 @@ template<typename factory, typename type>
 constexpr void pack(factory&& io, const type& what) ;
 
 template<typename factory, typename type, typename size_type=decltype(sizeof(int))>
-constexpr void read(factory&& io, type& to, size_type shift=0) ;
+constexpr size_type read(factory&& io, type& to, size_type shift=0) ;
 
 namespace details {
 
@@ -26,13 +26,39 @@ class cpp17_concepts {
 	}
 
 	constexpr static bool _is_size_member(const void*) { return false; }
-	template<typename t> constexpr static auto _is_size_member(const t* p) -> decltype(p->size(), void(), true) {
-		return true;
-	}
+	template<typename t> constexpr static auto _is_size_member(const t* p) -> decltype(p->size(), void(), true) { return true; }
+
+	constexpr static bool _is_resize_member(const void*) { return false; }
+	template<typename t> constexpr static auto _is_resize_member(t* p) -> decltype(p->resize(0), void(), true) { return true; }
+
+	constexpr static bool _is_emplace_member(const void*) { return false; }
+	template<typename t> constexpr static auto _is_emplace_member(t* p) -> decltype(p->emplace(), void(), true) { return true; }
+
+	constexpr static bool _is_element_type_member(const void*) { return false; }
+	template<typename t> constexpr static auto _is_element_type_member(t*) -> decltype(std::declval<typename t::element_type>(), void(), true) { return true; }
+
+	constexpr static bool _is_get_member_with_ptr(const void*) { return false; }
+	template<typename t> constexpr static auto _is_get_member_with_ptr(t* p) -> decltype(p->get(), void(), true) { return std::is_pointer_v<decltype(p->get())>; }
+
+	constexpr static bool _can_dereference(const void*) { return false; }
+	template<typename t> constexpr static auto _can_dereference(t* p) -> decltype(*(*p), void(), true) { return true; }
 public:
 	constexpr static bool is_adl_get = _is_adl_get(static_cast<const type*>(nullptr));
 	constexpr static bool is_size_member = _is_size_member(static_cast<type*>(nullptr));
+	constexpr static bool is_resize_member = _is_resize_member(static_cast<type*>(nullptr));
+	constexpr static bool is_emplace_member = _is_emplace_member(static_cast<type*>(nullptr));
+	constexpr static bool is_element_type_member = _is_element_type_member(static_cast<type*>(nullptr));
+	constexpr static bool is_get_member_with_ptr = _is_get_member_with_ptr(static_cast<type*>(nullptr));
+	constexpr static bool can_dereference = _can_dereference(static_cast<type*>(nullptr));
+	constexpr static bool is_smart_pointer = is_element_type_member && is_get_member_with_ptr && can_dereference;
+	constexpr static bool is_pointer = std::is_pointer_v<type> || is_smart_pointer;
 };
+
+template<typename type>
+constexpr decltype(sizeof(type)) size_of(const type* v) {
+	(void)v;
+	return sizeof(type);
+}
 
 template<auto... inds, typename factory_t, typename type>
 constexpr auto call_pack_cpp17(factory_t&& io, const type& src) {
@@ -41,20 +67,22 @@ constexpr auto call_pack_cpp17(factory_t&& io, const type& src) {
 	else (pack(io, get<inds>(src)),...);
 }
 
-/*
-template<auto ind, auto shift, typename factory_t, typename type>
-constexpr void foreach_get_read(const factory_t& io, type& to) {
-	if constexpr(ind < size(static_cast<const type*>(nullptr))) {
-		read(io, get<ind>(to), shift);
-		foreach_get_read<ind+1,shift+sizeof(decltype(get<ind>(to)))>(io, to);
+template<auto ind, typename factory_t, typename type, typename size_type>
+constexpr auto read_tuple(factory_t&& io, type& to, size_type shift) {
+	if constexpr( ind == size(static_cast<const type*>(nullptr)) ) return shift;
+	else {
+		auto& cur = get<ind>(to);
+		auto cur_shift = read(io, cur, shift);
+		return read_tuple<ind+1>(io, to, cur_shift);
 	}
 }
-*/
 
-template<auto... inds, typename factory_t, typename type, typename size_type>
-constexpr auto foreach_get_read(factory_t&& io, type& to, size_type shift, std::index_sequence<inds...>) {
-	shift -= sizeof(get<0>(to));
-	(read(io, get<inds>(to), shift += sizeof(get<inds>(to))), ...);
+template<typename factory_t, typename type, typename size_type>
+constexpr auto resize_as_need(factory_t&& io, type& to, size_type shift) {
+	auto sz = io.container_size(to.size());
+	auto ret = read(io, sz, shift);
+	to.resize(sz);
+	return ret;
 }
 
 } // namespace details
@@ -64,21 +92,53 @@ constexpr void pack(factory&& io, const type& what) {
 	using concepts = details::cpp17_concepts<type>;
 	if constexpr(concepts::is_adl_get)
 		details::call_pack_cpp17(io, what);
-	else if constexpr(concepts::is_size_member)
+	else if constexpr(concepts::is_size_member) {
+		pack(io, io.container_size(what.size()));
 		for(auto& item:what) pack(io, item);
-	else io.write(&what, 1);
+	}
+	else if constexpr(concepts::is_pointer) {
+		pack(io, bool{what==nullptr});
+		if(what != nullptr) pack(io, *what);
+	}
+	else io.template write(&what, 1);
 }
 
 
 template<typename factory, typename type, typename size_type>
-constexpr void read(factory&& io, type& to, size_type shift) {
+constexpr size_type read(factory&& io, type& to, size_type shift) {
+	static_assert( !std::is_const_v<type>, "cannot read to constant storage" );
+
 	using concepts = details::cpp17_concepts<type>;
-	io.read(shift, to);
-	if constexpr(concepts::is_adl_get)
-		details::foreach_get_read(io, to, shift, std::make_index_sequence<details::size(static_cast<const type*>(nullptr))>());
-	else if constexpr(concepts::is_size_member)
-		;
-	else io.read(shift, to);
+	if constexpr(concepts::is_adl_get) return details::read_tuple<0>(io, to, shift);
+	else if constexpr(concepts::is_pointer) {
+		bool is_null;
+		shift = read(io, is_null, shift);
+		if(!is_null) {
+			to = io.template init_ptr<type>();
+			shift = read(io, *to, shift);
+		}
+		return shift;
+	}
+	else if constexpr(concepts::is_size_member && concepts::is_resize_member) {
+		shift = details::resize_as_need(io, to, shift);
+		for(auto& item:to) shift = read(io, item, shift);
+		return shift;
+	}
+	else if constexpr(concepts::is_size_member && !concepts::is_resize_member && concepts::is_emplace_member) {
+		decltype(io.container_size(to.size())) sz;
+		shift = read(io, sz, shift);
+		for(decltype(sz) i=0;i<sz;++i) {
+			auto cur = io.template create_item_for_emplace<type>();
+			shift = read(io, cur, shift);
+			to.emplace(std::move(cur));
+		}
+		return shift;
+	}
+	else {
+		static_assert( std::is_integral_v<std::decay_t<type>> || std::is_floating_point_v<std::decay_t<type>> );
+		io.read(shift, to);
+		return shift + details::size_of(static_cast<type*>(nullptr));
+	}
 }
 
 } // namespace serp
