@@ -18,10 +18,13 @@ template<auto ind, typename type> cpp17_adl_fail get(const type&);
 template<template<typename...>class tuple, typename... types>
 constexpr auto size(const tuple<types...>*) { return sizeof...(types); }
 
-template<auto cur_ct_ind, template<typename...>class variant, typename... types>
-constexpr auto& ct_var_emplace(variant<types...>& var, auto cur, auto ind) {
-	if(cur == ind) return var.emplace<cur_ct_ind>();
-	else return ct_var_emplace<cur_ct_ind+1>(var, cur+1, ind);
+template<auto cur_ct_ind, template<typename...>class variant, typename... types, typename factory, typename shift_type, typename ind_type>
+constexpr auto ct_var_emplace(variant<types...>& var, factory&& io, shift_type shift, ind_type cur, ind_type ind) {
+	if constexpr(cur_ct_ind < sizeof...(types) ) {
+		if(cur == ind) return read(io, var.template emplace<cur_ct_ind>(), shift);
+		else return ct_var_emplace<cur_ct_ind+1>(var, io, shift, cur+1, ind);
+	}
+	else return shift;
 }
 
 template<typename type>
@@ -130,8 +133,7 @@ constexpr size_type read(factory&& io, type& to, size_type shift) {
 	if constexpr(concepts::is_variant) {
 		decltype(to.index()) ind;
 		shift = read(io, ind, shift);
-		details::ct_var_emplace();
-		ind.emplace<ind>();
+		return details::ct_var_emplace<0>(to, io, shift, (decltype(ind))0, ind);
 	}
 	else if constexpr(concepts::is_adl_get) return details::read_tuple<0>(io, to, shift);
 	else if constexpr(concepts::is_pointer) {

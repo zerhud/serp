@@ -253,6 +253,10 @@ static_assert( []{
 	io io;
 	std::variant<std::vector<std::string>, std::string> answ, src = "str"s;
 	serp::pack(io, src);
-	serp::read(io, answ);
-	return answ.index() ;
-}() == 1);
+	auto shift = serp::read(io, answ);
+	return (answ.index() == 1)
+		+ (2*(get<1>(answ).size()==3))
+		+ (4*(get<1>(answ)=="str"))
+		+ (8*(shift==sizeof(decltype(src.index())) + sizeof(decltype(io.container_size(0))) + 3))
+		;
+}() == 15);
