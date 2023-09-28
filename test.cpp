@@ -222,6 +222,10 @@ static_assert( serp::details::cpp17_concepts<const std::shared_ptr<int>>::is_poi
 static_assert( serp::details::cpp17_concepts<const int*>::is_pointer );
 static_assert( serp::details::cpp17_concepts<int*>::is_pointer );
 
+static_assert( serp::details::cpp17_concepts<std::optional<int>>::is_optional );
+static_assert( !serp::details::cpp17_concepts<int*>::is_optional );
+static_assert( !serp::details::cpp17_concepts<int>::is_optional );
+
 constexpr auto rw_pointer_maker() {
 	io io;
 	type_constexpr src{ 1, new type_constexpr }, answ;
@@ -260,3 +264,20 @@ static_assert( []{
 		+ (8*(shift==sizeof(decltype(src.index())) + sizeof(decltype(io.container_size(0))) + 3))
 		;
 }() == 15);
+
+static_assert( []{
+	using namespace std::literals;
+	io io;
+	std::optional<std::string> answ, src = "str"s;
+	serp::pack(io, src);
+	serp::read(io, answ);
+	return answ.has_value() + (2*(*answ=="str"sv));
+}() == 3);
+static_assert( []{
+	using namespace std::literals;
+	io io;
+	std::optional<std::string> answ, src;
+	serp::pack(io, src);
+	serp::read(io, answ);
+	return answ.has_value();
+}() == false);

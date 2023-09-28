@@ -58,6 +58,15 @@ class cpp17_concepts {
 	constexpr static auto _visit_cpp17_helper = [](const auto&) {};
 	constexpr static bool _is_adl_visit(const void*) { return false; }
 	template<typename t> constexpr static auto _is_adl_visit(const t* p) -> decltype(visit(_visit_cpp17_helper, *p), void(), true) { return true; }
+
+	constexpr static bool _has_op_bool(const void*) { return false; }
+	template<typename t> constexpr static auto _has_op_bool(const t* p) -> decltype(!!(*p), void(), true) { return true; }
+	
+	constexpr static bool _has_op_star(const void*) { return false; }
+	template<typename t> constexpr static auto _has_op_star(const t* p) ->decltype(*(*p), void(), true) { return true; }
+
+	constexpr static bool _has_value_method(const void*) { return false; }
+	template<typename t> constexpr static auto _has_value_method(const t* p) ->decltype((*p).value(), void(), true) { return true; }
 public:
 	constexpr static bool is_adl_get = _is_adl_get(static_cast<const type*>(nullptr));
 	constexpr static bool is_size_member = _is_size_member(static_cast<type*>(nullptr));
@@ -69,6 +78,7 @@ public:
 	constexpr static bool is_smart_pointer = is_element_type_member && is_get_member_with_ptr && can_dereference;
 	constexpr static bool is_pointer = std::is_pointer_v<type> || is_smart_pointer;
 	constexpr static bool is_variant = _is_index_member(static_cast<const type*>(nullptr)) && is_adl_get && _is_adl_visit(static_cast<const type*>(nullptr));
+	constexpr static bool is_optional = _has_op_bool(static_cast<const type*>(nullptr)) && _has_op_star(static_cast<const type*>(nullptr)) && _has_value_method(static_cast<const type*>(nullptr));
 };
 
 template<typename type>
@@ -111,6 +121,10 @@ constexpr void pack(factory&& io, const type& what) {
 		pack(io, what.index());
 		visit( [&io](const auto& v){ pack(io, v); }, what );
 	}
+	else if constexpr(concepts::is_optional) {
+		pack(io, !!what);
+		if(what) pack(io, *what);
+	}
 	else if constexpr(concepts::is_adl_get)
 		details::call_pack_cpp17(io, what);
 	else if constexpr(concepts::is_size_member) {
@@ -134,6 +148,15 @@ constexpr size_type read(factory&& io, type& to, size_type shift) {
 		decltype(to.index()) ind;
 		shift = read(io, ind, shift);
 		return details::ct_var_emplace<0>(to, io, shift, (decltype(ind))0, ind);
+	}
+	else if constexpr(concepts::is_optional) {
+		bool has_value;
+		shift = read(io, has_value, shift);
+		if(has_value) {
+			auto& val = to.emplace();
+			shift = read(io, val, shift);
+		}
+		return shift;
 	}
 	else if constexpr(concepts::is_adl_get) return details::read_tuple<0>(io, to, shift);
 	else if constexpr(concepts::is_pointer) {
